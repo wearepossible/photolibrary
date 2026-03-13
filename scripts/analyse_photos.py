@@ -31,8 +31,16 @@ ANALYSIS_PROMPT = """Analyse this photo for a climate charity's photo library.
 
 Return a JSON object with exactly these fields:
 - "keywords": an array of 10-20 descriptive keywords/tags. Include objects, settings, activities, weather, mood, and environmental context. Be specific to climate/environment topics where relevant (e.g. "solar panels" not just "panels", "cycling infrastructure" not just "road").
-- "description": 2-3 sentences describing the photo in detail. Mention what's happening, the setting, and any notable details.
+- "description": 2-3 sentences describing the photo in detail. Mention what's happening, the setting, and any notable details. Write plainly and specifically — describe what you actually see, not what you infer.
 - "alt_text": accessible alt text for screen readers, 1 sentence, concise but descriptive.
+
+Style rules for description and alt_text:
+- Do NOT use these overused words/phrases: diverse, vibrant, bustling, lush, verdant, nestled, picturesque, serene, captivating, striking, dedicated, passionate, hands-on, collaborative effort, environmental stewardship, showcasing, highlighting, symbolizing, fostering, embodying, evoking, exuding, underscoring, conveying, a sense of, community spirit, multigenerational, multicultural, multifaceted
+- Avoid hedging like "appears to be", "suggesting", "hinting at", "what appears to be", "can be seen". Just state what you see.
+- Avoid "engaged in [activity]" — just name the activity directly.
+- Avoid "participating in" — say what people are doing.
+- Don't narrate the photo as a photo ("this image captures", "the photo shows"). Just describe the scene.
+- Be concrete and specific, not abstract or editorialising.
 
 Return ONLY the JSON object, no other text."""
 

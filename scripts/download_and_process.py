@@ -30,7 +30,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 import pillow_heif
-from PIL import Image
+from PIL import Image, ImageOps
 
 # Register HEIC/HEIF support with Pillow
 pillow_heif.register_heif_opener()
@@ -296,6 +296,12 @@ def generate_thumbnail(source_path: Path, thumb_path: Path) -> bool:
 
     try:
         img = Image.open(source_path)
+
+        # Apply EXIF orientation before processing — cameras often store
+        # photos in a fixed orientation with an EXIF tag for display rotation.
+        # Without this, thumbnails of portrait photos appear sideways.
+        img = ImageOps.exif_transpose(img)
+
         img = img.convert("RGB")
 
         # Resize to THUMBNAIL_WIDTH, maintaining aspect ratio
