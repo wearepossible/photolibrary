@@ -124,42 +124,22 @@ exports.handler = async (event) => {
       }
     }
 
-    // Remove records where ALL locations and alternatives are gone
-    let removedCount = 0;
-    const updatedRecords = records.filter((r) => {
-      const locsRemaining = (r.locations || []).filter(
+    // Count records whose files are no longer on Drive
+    // NOTE: We only report — never auto-delete. The 10s Netlify timeout
+    // may cut off the Drive scan before all pages are fetched, which would
+    // cause false "removed" reports. Actual deletions should be done via
+    // the Python scripts which have no timeout.
+    let missingCount = 0;
+    for (const r of records) {
+      const locsOnDrive = (r.locations || []).some(
         (l) => driveFileIds.has(l.drive_file_id)
       );
-      const altsRemaining = (r.alternatives || []).filter(
+      const altsOnDrive = (r.alternatives || []).some(
         (a) => driveFileIds.has(a.drive_file_id)
       );
-
-      if (locsRemaining.length === 0 && altsRemaining.length === 0) {
-        removedCount++;
-        return false;
+      if (!locsOnDrive && !altsOnDrive) {
+        missingCount++;
       }
-
-      // Update locations/alternatives to remove missing ones
-      r.locations = locsRemaining;
-      r.alternatives = altsRemaining;
-
-      // Update top-level drive links if best location changed
-      if (locsRemaining.length > 0) {
-        r.drive_file_url = `https://drive.google.com/file/d/${locsRemaining[0].drive_file_id}/view`;
-        r.drive_folder_url = `https://drive.google.com/drive/folders/${locsRemaining[0].folder_id}`;
-      }
-
-      return true;
-    });
-
-    // Save updated data.json if there were removals
-    if (removedCount > 0) {
-      await r2.send(new PutObjectCommand({
-        Bucket: bucket,
-        Key: "data.json",
-        Body: JSON.stringify(updatedRecords, null, 2),
-        ContentType: "application/json",
-      }));
     }
 
     return {
@@ -168,13 +148,12 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         scanned: driveFiles.length,
         existing: records.length,
-        added: 0,  // New files need manual processing via Python scripts
-        removed: removedCount,
         newFilesFound: newFiles.length,
+        missingFromDrive: missingCount,
         message: newFiles.length > 0
-          ? `Found ${newFiles.length} new files on Drive. Run the Python sync script to process them (generate thumbnails + AI analysis).`
-          : removedCount > 0
-            ? `Removed ${removedCount} records for files no longer on Drive.`
+          ? `Found ${newFiles.length} new file(s) on Drive. Run the Python sync script to process them.`
+          : missingCount > 0
+            ? `${missingCount} record(s) not found on Drive (may be incomplete scan due to timeout). Run Python scripts to confirm.`
             : "Everything is up to date.",
       }),
     };

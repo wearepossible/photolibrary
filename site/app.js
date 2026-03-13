@@ -492,9 +492,7 @@
 
       if (res.ok) {
         const result = await res.json();
-        showSyncStatus(
-          `Sync complete: ${result.added || 0} added, ${result.removed || 0} removed.`
-        );
+        showSyncStatus(result.message || "Sync complete.");
         await loadData();
       } else {
         showSyncStatus("Sync failed. Please try again.");
