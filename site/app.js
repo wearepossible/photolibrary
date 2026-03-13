@@ -481,7 +481,7 @@
     const btn = document.getElementById("sync-btn");
     btn.disabled = true;
     btn.textContent = "Syncing...";
-    showSyncStatus("Syncing with Google Drive...");
+    showSyncStatus("Starting sync...");
 
     try {
       const pw = sessionStorage.getItem("pw");
@@ -492,14 +492,13 @@
 
       if (res.ok) {
         const result = await res.json();
-        showSyncStatus(result.message || "Sync complete.");
-        await loadData();
+        showSyncStatus(result.message || "Sync started. New photos will appear in a few minutes.");
       } else {
-        showSyncStatus("Sync failed. Please try again.");
+        showSyncStatus("Failed to start sync. Please try again.");
       }
     } catch (err) {
       console.error("Sync error:", err);
-      showSyncStatus("Sync failed. Please try again.");
+      showSyncStatus("Failed to start sync. Please try again.");
     }
 
     btn.disabled = false;
