@@ -19,7 +19,8 @@ Photos live on a shared Google Drive. This library provides a browsable, searcha
 | Frontend | Vanilla HTML/CSS/JS on [Netlify](https://www.netlify.com/) |
 | Thumbnails + data | [Cloudflare R2](https://www.cloudflare.com/r2/) |
 | Image originals | Google Drive (Shared Drive) |
-| Backend functions | Netlify Functions |
+| Backend functions | Netlify Functions (metadata editing, sync trigger) |
+| Sync | Python script via [GitHub Actions](https://github.com/features/actions) (daily cron + manual) |
 | Image analysis | Claude API (Haiku 4.5) |
 
 Running cost: **$0/month** (all free tiers).
@@ -70,19 +71,23 @@ python scripts/upload_to_r2.py
 
 ### Environment variables
 
-See [CLAUDE.md](CLAUDE.md) for the full list of environment variables needed for local scripts and Netlify Functions.
+See [CLAUDE.md](CLAUDE.md) for the full list of environment variables needed for local scripts, Netlify Functions, and GitHub Actions.
 
 ### Deployment
 
-Push to `main` — Netlify auto-deploys from the `site/` directory. Set all environment variables in the Netlify dashboard.
+Push to `main` — Netlify auto-deploys from the `site/` directory. Set environment variables in:
+- **Netlify dashboard** — for Netlify Functions (metadata editing, sync trigger)
+- **GitHub repository secrets** — for GitHub Actions (sync workflow)
 
 ## Architecture decisions
 
 - **No build step** — vanilla HTML/CSS/JS keeps it simple for a solo maintainer
 - **R2 for data** — `data.json` lives in R2 (not Git) because it's updated by sync functions and metadata edits
 - **Thumbnails in R2** — Drive API thumbnail links require auth, so we host our own
+- **GitHub Actions for sync** — Netlify Functions have a 10-second timeout, too short for scanning 2000+ Drive files. The sync runs as a Python script in GitHub Actions with no timeout constraints. The Netlify Function is a thin trigger that calls the GitHub Actions API.
 - **Client-side password** — not real security, just a deterrent for casual access. Server-side validation on all Netlify Functions
 - **AI metadata is editable** — Claude generates initial keywords/descriptions, but anyone with the password can overwrite them
+- **AI description cleanup** — post-processing rules strip overused AI-isms (e.g. "diverse", "vibrant", "appears to be") from generated descriptions
 
 ## Brand
 

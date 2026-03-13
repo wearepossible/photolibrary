@@ -10,7 +10,7 @@ Building a searchable, password-protected photo library for a climate charity. P
 - **Data**: `data.json` stored in Cloudflare R2 (not in Git — updated by sync functions)
 - **Image originals**: Stay on Google Drive (no migration needed)
 - **Thumbnails**: Generated during sync, stored in Cloudflare R2 (free tier, minimal storage — ~50MB for ~1000 photos)
-- **Sync backend**: Netlify Functions (free tier: 125k invocations/month, 10-second timeout) — scans Drive for new/removed files, generates thumbnails, triggers AI analysis for new photos
+- **Sync backend**: GitHub Actions (triggered by Netlify Function or daily cron) — runs Python sync script that scans Drive for new/removed files, generates thumbnails, triggers AI analysis for new photos
 - **Image analysis (initial bulk)**: Claude API (Haiku 4.5) — ~$3 for ~1000 images
 - **Image analysis (ongoing new photos)**: Claude API (Haiku 4.5) — triggered during sync, only for photos not yet analysed
 - **Password protection**: Client-side JS gate (a simple login page that checks a hardcoded password before revealing content — not real security, just a deterrent for casual access). Server-side validation on all Netlify Functions.
@@ -94,11 +94,11 @@ All metadata fields (`keywords`, `description`, `alt_text`) are editable in the 
 ### Ongoing Operation
 
 - **Users upload photos to Google Drive** as they already do — no new workflow to learn
-- **Scheduled sync** (Netlify Function, runs on a schedule) scans Drive for changes:
+- **Scheduled sync** (GitHub Actions, daily at 6am UTC) runs Python sync script:
   - New files → generate thumbnail, run AI analysis, add to `data.json`
   - Removed files → remove from `data.json`, delete thumbnail from R2
   - Dedup check on new files (MD5 match against existing records)
-- **Manual sync button** in the web UI triggers the same sync function on demand
+- **Manual sync button** in the web UI triggers the same sync via Netlify Function → GitHub Actions
 - **Metadata editing** happens in the web UI — anyone with the password can edit keywords, descriptions, campaigns, and credits for any photo
 
 ## Phases
@@ -142,25 +142,26 @@ Single-page app with integrated browsing and metadata editing:
 
 ### Phase 5: Sync Function (DONE)
 
-Netlify Function that:
+Python sync script (`scripts/sync.py`) runs in GitHub Actions:
 1. Scans Drive for all image files (same logic as `scan_drive.py`)
-2. Compares against current `data.json`
+2. Fetches current `data.json` from R2 and compares
 3. For new files: downloads, generates thumbnail, uploads to R2, runs AI analysis, adds record
 4. For removed files: removes record from `data.json`, deletes thumbnail from R2
 5. For moved files: updates location info
 6. Writes updated `data.json` back to R2
 
 Triggered by:
-- Scheduled execution (frequency TBD — daily or weekly)
-- Manual "Sync now" button in the web UI
+- Daily cron (6am UTC) via GitHub Actions
+- Manual "Sync now" button in the web UI (Netlify Function triggers GitHub Actions via `workflow_dispatch`)
 
-If the 10-second Netlify timeout is too tight, fall back to a Cloudflare Worker with Cron Trigger (30s CPU time).
+The Netlify Function (`sync-drive.js`) is a thin trigger — it calls the GitHub Actions API to start the workflow, avoiding the 10-second Netlify timeout. The Python script runs with no timeout constraints in GitHub Actions.
 
 ## Tech Stack
 
 - **Migration scripts**: Python (google-api-python-client, anthropic SDK, Pillow, imagehash, boto3)
+- **Sync**: Python script via GitHub Actions (daily cron + manual trigger)
 - **Static site**: Vanilla HTML/CSS/JS (no build step)
-- **Backend functions**: Netlify Functions (JavaScript/Node.js)
+- **Backend functions**: Netlify Functions (JavaScript/Node.js) — metadata editing + sync trigger
 - **Thumbnails + data**: Cloudflare R2 via S3-compatible API
 - **Image originals**: Google Drive (unchanged)
 - **Image analysis**: Claude API, Haiku 4.5
@@ -197,30 +198,51 @@ If the 10-second Netlify timeout is too tight, fall back to a Cloudflare Worker 
 - `R2_PUBLIC_URL` — public base URL for the R2 bucket (e.g. `https://pub-xxx.r2.dev`)
 - `R2_JURISDICTION` — R2 bucket jurisdiction (e.g. `eu` for EU buckets), leave empty for default
 - `ADMIN_PASSWORD` — the password for the client-side gate and server-side validation
+- `GITHUB_PAT` — fine-grained GitHub Personal Access Token with Actions write permission (used by sync-drive.js to trigger the GitHub Actions workflow)
+
+### For GitHub Actions (set as repository secrets)
+- `GOOGLE_SERVICE_ACCOUNT_KEY_JSON` — the full JSON content of the service account key (single-line)
+- `SHARED_DRIVE_ID`
+- `ANTHROPIC_API_KEY`
+- `R2_ACCOUNT_ID`
+- `R2_ACCESS_KEY_ID`
+- `R2_SECRET_ACCESS_KEY`
+- `R2_BUCKET_NAME`
+- `R2_PUBLIC_URL`
+- `R2_JURISDICTION`
 
 ## File Structure (Target)
 
 ```
 photo-library/
 ├── CLAUDE.md
+├── README.md
 ├── .env                          # Local migration keys (gitignored)
 ├── requirements.txt              # Python dependencies for migration
+├── .github/
+│   └── workflows/
+│       └── sync.yml              # GitHub Actions: daily cron + manual sync trigger
 ├── scripts/
 │   ├── scan_drive.py             # Phase 1: scan Shared Drive, catalogue all images
 │   ├── dedup_and_filter.py       # Phase 1: dedup passes + logo filtering, produce report
 │   ├── download_and_process.py   # Phase 2: download images, generate thumbnails
 │   ├── analyse_photos.py         # Phase 2: Claude API keyword generation
+│   ├── cleanup_descriptions.py   # Post-processing: remove AI-isms from descriptions
+│   ├── fix_rotated_thumbnails.py # One-off: fix EXIF rotation on thumbnails
 │   ├── upload_to_r2.py           # Phase 3: upload thumbnails + data.json to R2
+│   ├── sync.py                   # Ongoing sync: scan Drive, process changes, update R2
 │   └── utils.py                  # Shared helpers
 ├── site/
 │   ├── index.html                # Main interface (browse + search + metadata editor)
 │   ├── style.css
-│   └── app.js                    # Search, gallery, metadata editing, sync trigger
+│   ├── app.js                    # Search, gallery, metadata editing, sync trigger
+│   └── Possible_Logo_White.png   # Logo for header
 ├── netlify/
 │   └── functions/
-│       ├── sync-drive.js         # Scans Drive, syncs new/removed photos
+│       ├── sync-drive.js         # Triggers GitHub Actions sync workflow
 │       ├── update-record.js      # Updates metadata for a photo in data.json
-│       └── delete-record.js      # Removes a photo record from data.json
+│       ├── delete-record.js      # Removes a photo record from data.json
+│       └── verify-password.js    # Server-side password validation
 ├── data/
 │   ├── drive_scan_report.json    # Full scan results (intermediate, gitignored)
 │   ├── dedup_report.html         # Human-readable dedup review report (gitignored)
@@ -244,11 +266,8 @@ campaigns.json
 ### 1. Google Drive API for Shared Drives
 The Drive API requires `supportsAllDrives=True`, `includeItemsFromAllDrives=True`, and the `driveId` parameter on all calls, or it silently returns zero results. The service account must be added as a member of the Shared Drive. Rate limits are generous (20,000 queries/day) but the script includes backoff logic.
 
-### 2. Netlify Function timeout for sync
-The 10-second timeout may be too tight for scanning ~1000 files + downloading new thumbnails + running AI analysis. Mitigations:
-- The sync function can be split: scan-only (fast, lists changes) vs process (handles one file at a time, called repeatedly)
-- If Netlify is too constrained, move to a Cloudflare Worker with Cron Trigger (30s CPU time)
-- For bulk initial processing, always use the local Python scripts
+### 2. Netlify Function timeout for sync (SOLVED)
+The 10-second Netlify timeout was too tight for a full Drive scan. Solved by moving the sync to a Python script running in GitHub Actions (no timeout constraints). The Netlify Function now just triggers the GitHub Actions workflow via `workflow_dispatch`. For bulk initial processing, use the local Python scripts.
 
 ### 3. Google Drive thumbnail links require auth
 Drive API thumbnail links (`thumbnailLink`) require authentication — they can't be used directly in a public web page. This is why we generate and host our own thumbnails in R2.
