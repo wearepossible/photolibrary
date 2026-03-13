@@ -92,6 +92,13 @@
       const dataRes = await fetch(dataUrl);
       allPhotos = shuffle(await dataRes.json());
       applyFilters();
+
+      // Open photo from URL hash (e.g. #photo-id)
+      const hashId = window.location.hash.slice(1);
+      if (hashId) {
+        const linked = allPhotos.find((p) => p.id === hashId);
+        if (linked) openModal(linked);
+      }
     } catch (err) {
       loading.textContent = "Failed to load photos. Please try again.";
       console.error("Load error:", err);
@@ -278,6 +285,7 @@
 
   function openModal(photo) {
     currentPhoto = photo;
+    history.replaceState(null, "", `#${photo.id}`);
     const modal = document.getElementById("modal");
     modal.hidden = false;
     document.body.style.overflow = "hidden";
@@ -372,6 +380,7 @@
     document.getElementById("modal").hidden = true;
     document.body.style.overflow = "";
     currentPhoto = null;
+    history.replaceState(null, "", window.location.pathname + window.location.search);
   }
 
   document.querySelector(".modal-close").addEventListener("click", closeModal);
