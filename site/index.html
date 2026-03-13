@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Photo Library — Possible</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="locked">
+  <!-- Auth Gate -->
+  <div id="auth-gate" class="auth-gate" role="dialog" aria-label="Authentication required">
+    <div class="auth-box">
+      <h1>Possible</h1>
+      <p class="auth-subtitle">Photo Library</p>
+      <form id="auth-form">
+        <label for="auth-password" class="sr-only">Password</label>
+        <input type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required>
+        <button type="submit">Enter</button>
+      </form>
+      <p id="auth-error" class="auth-error" role="alert" hidden>Incorrect password. Please try again.</p>
+    </div>
+  </div>
+
+  <a href="#photo-grid" class="sr-only skip-link">Skip to photos</a>
+
+  <!-- Header -->
+  <header>
+    <div class="header-inner">
+      <div class="header-brand" aria-label="Possible Photo Library">
+        <span class="header-title">Possible</span>
+        <span class="header-subtitle">Photo Library</span>
+      </div>
+
+      <div class="header-search">
+        <label for="search-input" class="sr-only">Search photos</label>
+        <input type="search" id="search-input" placeholder="Search by keyword, description, campaign, credit...">
+      </div>
+
+      <div class="header-actions">
+        <span id="result-count" class="result-count" aria-live="polite"></span>
+        <button id="sync-btn">Sync</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main>
+    <div id="photo-grid" class="photo-grid"></div>
+    <div id="loading" class="loading" hidden>Loading photos...</div>
+    <div id="no-results" class="no-results" hidden>No photos match your search.</div>
+  </main>
+
+  <!-- Photo Detail Modal -->
+  <div id="modal" class="modal" role="dialog" aria-label="Photo detail" hidden>
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <button class="modal-close" aria-label="Close">&times;</button>
+
+      <div class="modal-body">
+        <div class="modal-image-section">
+          <img id="modal-img" src="" alt="">
+          <div id="modal-alternatives" class="alternatives-section" hidden>
+            <h3>Similar photos</h3>
+            <div id="alternatives-grid" class="alternatives-grid"></div>
+          </div>
+        </div>
+
+        <div class="modal-info-section">
+          <div class="modal-meta">
+            <h2 id="modal-filename"></h2>
+
+            <div class="meta-field">
+              <label>Description</label>
+              <p id="modal-description" class="editable" data-field="description"></p>
+            </div>
+
+            <div class="meta-field">
+              <label>Alt text</label>
+              <p id="modal-alt-text" class="editable" data-field="alt_text"></p>
+            </div>
+
+            <div class="meta-field">
+              <label>Keywords</label>
+              <p id="modal-keywords" class="editable" data-field="keywords"></p>
+            </div>
+
+            <div class="meta-field">
+              <label>Campaign</label>
+              <p id="modal-campaign" class="editable" data-field="campaign"></p>
+            </div>
+
+            <div class="meta-field">
+              <label>Credit</label>
+              <p id="modal-credit" class="editable" data-field="credit"></p>
+            </div>
+
+            <div class="meta-field">
+              <label>Date added</label>
+              <p id="modal-date-added"></p>
+            </div>
+
+            <div class="meta-field">
+              <label>Dimensions</label>
+              <p id="modal-dimensions"></p>
+            </div>
+          </div>
+
+          <div class="modal-locations">
+            <h3>Locations on Drive</h3>
+            <ul id="modal-locations-list"></ul>
+          </div>
+
+          <div class="modal-actions">
+            <a id="modal-drive-link" href="#" target="_blank" rel="noopener" class="btn-primary">Open in Drive</a>
+            <a id="modal-folder-link" href="#" target="_blank" rel="noopener" class="btn-secondary">Open folder</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Modal -->
+  <div id="edit-modal" class="edit-modal" role="dialog" aria-label="Edit field" hidden>
+    <div class="edit-modal-backdrop"></div>
+    <div class="edit-modal-content">
+      <h3>Edit <span id="edit-field-name"></span></h3>
+      <label for="edit-input" class="sr-only">Edit value</label>
+      <textarea id="edit-input" rows="3"></textarea>
+      <p id="edit-hint" class="edit-hint"></p>
+      <div class="edit-actions">
+        <button id="edit-cancel" class="btn-secondary">Cancel</button>
+        <button id="edit-save" class="btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sync Status -->
+  <div id="sync-status" class="sync-status" role="status" aria-live="polite" hidden>
+    <p id="sync-message"></p>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

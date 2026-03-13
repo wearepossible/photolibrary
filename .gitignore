@@ -1,0 +1,25 @@
+.env
+*.pyc
+__pycache__/
+.DS_Store
+node_modules/
+photo-library-*.json
+
+# Data files (generated, stored in R2)
+data/drive_scan_report.json
+data/approved_files.json
+data/exclusion_list.json
+data/raw_metadata.json
+data/dedup_report.html
+data/dedup_summary.json
+data/thumbnails_cache/
+data/downloads/
+data/thumbnails/
+data/data.json
+data/campaigns.json
+data/review_decisions.json
+data/analysis_progress.json
+
+# Site symlinks (local dev only)
+site/thumbnails
+site/data
