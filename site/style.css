@@ -331,9 +331,7 @@ header {
   z-index: 200;
 }
 
-.sync-status-icon:hover .sync-status-tooltip,
-.sync-status-icon:focus .sync-status-tooltip,
-.sync-status-icon:focus-within .sync-status-tooltip {
+.sync-status-icon:hover + .sync-status-tooltip {
   opacity: 1;
 }
 
