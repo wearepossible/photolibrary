@@ -23,6 +23,9 @@ import os
 import sys
 import tempfile
 import time
+import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from pathlib import Path
 
 import anthropic
@@ -47,6 +50,11 @@ from utils import get_env, infer_campaign_from_path, slugify, unique_slug
 
 THUMBNAIL_WIDTH = 400
 THUMBNAIL_QUALITY = 75
+
+# Number of new photos to process in parallel. Bounded by Anthropic rate
+# limits (Haiku tier) and Drive download bandwidth. 5 is a safe default that
+# gives a ~5x speedup over serial without tripping rate limits.
+PARALLEL_WORKERS = 5
 
 IMAGE_MIMES = {
     "image/jpeg", "image/png", "image/gif",
@@ -297,27 +305,25 @@ def analyse_image(client, thumb_bytes):
         return None
 
 
-def process_new_file(file_info, drive, r2, bucket, public_url, ai_client, used_slugs):
-    """Process a single new file: download, thumbnail, AI analysis, upload."""
-    slug = unique_slug(slugify(file_info["name"]), used_slugs)
-    used_slugs.add(slug)
+def process_new_file(file_info, drive, r2, bucket, public_url, ai_client, slug):
+    """Process a single new file: download, thumbnail, AI analysis, upload.
 
-    # Download from Drive
-    print(f"    Downloading {file_info['name']}...", end=" ", flush=True)
+    The caller pre-allocates ``slug`` to keep this function free of shared
+    mutable state so it can be run in parallel.
+    """
+    name = file_info["name"]
     try:
         image_bytes = download_from_drive(drive, file_info["id"])
     except Exception as e:
-        print(f"FAILED ({e})", flush=True)
+        print(f"    {name}: DOWNLOAD FAILED ({e})", flush=True)
         return None
 
-    # Generate thumbnail
     try:
         thumb_bytes = generate_thumbnail_bytes(image_bytes)
     except Exception as e:
-        print(f"THUMB FAILED ({e})", flush=True)
+        print(f"    {name}: THUMB FAILED ({e})", flush=True)
         return None
 
-    # Upload thumbnail to R2
     thumb_key = f"thumbnails/{slug}.jpg"
     r2.put_object(
         Bucket=bucket, Key=thumb_key,
@@ -325,16 +331,15 @@ def process_new_file(file_info, drive, r2, bucket, public_url, ai_client, used_s
     )
     thumb_url = f"{public_url}/{thumb_key}"
 
-    # AI analysis
     ai_result = None
     if ai_client:
         ai_result = analyse_image(ai_client, thumb_bytes)
         if ai_result:
-            print(f"OK ({len(ai_result.get('keywords', []))} keywords)", flush=True)
+            print(f"    {name}: OK ({len(ai_result.get('keywords', []))} keywords)", flush=True)
         else:
-            print("AI failed, added without metadata", flush=True)
+            print(f"    {name}: AI failed, added without metadata", flush=True)
     else:
-        print("OK (no AI)", flush=True)
+        print(f"    {name}: OK (no AI)", flush=True)
 
     # Build record
     campaign = infer_campaign_from_path(file_info.get("folder_path", ""))
@@ -368,10 +373,96 @@ def process_new_file(file_info, drive, r2, bucket, public_url, ai_client, used_s
     return record
 
 
+# --- Sync status (consumed by the UI status icon) ---
+
+def write_sync_status(r2, bucket, status):
+    """Write the sync result summary to R2 for the UI to read."""
+    try:
+        r2.put_object(
+            Bucket=bucket, Key="sync-status.json",
+            Body=json.dumps(status, indent=2).encode("utf-8"),
+            ContentType="application/json",
+            CacheControl="no-cache",
+        )
+    except Exception as e:
+        print(f"  Warning: failed to write sync-status.json: {e}", flush=True)
+
+
+# --- Orphan thumbnail cleanup ---
+
+def list_r2_thumbnails(r2, bucket):
+    """List every key under the thumbnails/ prefix in R2."""
+    keys = []
+    paginator = r2.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix="thumbnails/"):
+        for obj in page.get("Contents", []) or []:
+            keys.append(obj["Key"])
+    return keys
+
+
+def referenced_thumbnail_keys(records):
+    """Build the set of thumbnail R2 keys that are referenced by data.json."""
+    referenced = set()
+    for r in records:
+        referenced.add(f"thumbnails/{r['id']}.jpg")
+        for alt in r.get("alternatives", []):
+            alt_filename = alt.get("filename", "")
+            if alt_filename:
+                stem = Path(alt_filename).stem
+                if stem:
+                    referenced.add(f"thumbnails/{stem}.jpg")
+    return referenced
+
+
+def cleanup_orphan_thumbnails(r2, bucket, records, dry_run=False):
+    """Delete thumbnails in R2 that aren't referenced by any record."""
+    all_keys = set(list_r2_thumbnails(r2, bucket))
+    referenced = referenced_thumbnail_keys(records)
+    orphans = sorted(all_keys - referenced)
+
+    if not orphans:
+        print("  No orphan thumbnails found.", flush=True)
+        return 0
+
+    print(f"  Found {len(orphans)} orphan thumbnails.", flush=True)
+    if dry_run:
+        for k in orphans[:20]:
+            print(f"    would delete: {k}", flush=True)
+        if len(orphans) > 20:
+            print(f"    ... and {len(orphans) - 20} more", flush=True)
+        return len(orphans)
+
+    # S3 delete_objects takes up to 1000 keys per call
+    deleted = 0
+    for i in range(0, len(orphans), 1000):
+        batch = orphans[i:i + 1000]
+        r2.delete_objects(
+            Bucket=bucket,
+            Delete={"Objects": [{"Key": k} for k in batch]},
+        )
+        deleted += len(batch)
+    print(f"  Deleted {deleted} orphan thumbnails.", flush=True)
+    return deleted
+
+
 # --- Main sync ---
 
 def main():
     dry_run = "--dry-run" in sys.argv
+
+    started_at = datetime.now(timezone.utc)
+    status = {
+        "started_at": started_at.isoformat(),
+        "completed_at": None,
+        "duration_seconds": None,
+        "status": "running",
+        "added": 0,
+        "removed": 0,
+        "failed": 0,
+        "orphans_cleaned": 0,
+        "total_records": None,
+        "error": None,
+    }
 
     drive = get_drive_service()
     drive_id = get_env("SHARED_DRIVE_ID")
@@ -490,25 +581,64 @@ def main():
     else:
         print("  Warning: ANTHROPIC_API_KEY not set, skipping AI analysis", flush=True)
 
+    # Pre-allocate slugs serially so the parallel workers don't race on the
+    # used_slugs set. Each file gets a unique slug before any parallel work
+    # starts.
+    file_slugs = []
+    for f in new_files:
+        slug = unique_slug(slugify(f["name"]), used_slugs)
+        used_slugs.add(slug)
+        file_slugs.append((f, slug))
+
     added = 0
     failed = 0
-    for i, f in enumerate(new_files):
-        print(f"  [{i+1}/{len(new_files)}]", end=" ", flush=True)
-        record = process_new_file(f, drive, r2, bucket, public_url, ai_client, used_slugs)
-        if record:
-            records.append(record)
-            added += 1
-        else:
-            failed += 1
+    if file_slugs:
+        print(f"\nProcessing {len(file_slugs)} new files with {PARALLEL_WORKERS} workers...", flush=True)
 
-        # Rate limiting
-        time.sleep(0.3)
+    with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as pool:
+        futures = {
+            pool.submit(
+                process_new_file, f, drive, r2, bucket, public_url, ai_client, slug
+            ): f
+            for f, slug in file_slugs
+        }
+        for i, fut in enumerate(as_completed(futures), start=1):
+            try:
+                record = fut.result()
+            except Exception as e:
+                print(f"    [{i}/{len(file_slugs)}] worker error: {e}", flush=True)
+                record = None
+            if record:
+                records.append(record)
+                added += 1
+            else:
+                failed += 1
+            if i % 25 == 0:
+                print(f"  Progress: {i}/{len(file_slugs)} ({added} added, {failed} failed)", flush=True)
 
     # Upload updated data.json and campaigns.json
     if new_files or removed_records:
         print(f"\nUploading updated data.json ({len(records)} records)...", flush=True)
         upload_data_json(r2, bucket, records)
         upload_campaigns_json(r2, bucket, records)
+
+    # Clean up any orphan thumbnails (uploaded by previous runs that died
+    # before data.json was written, or left behind after deletions).
+    print("\nChecking for orphan thumbnails in R2...", flush=True)
+    orphans_cleaned = cleanup_orphan_thumbnails(r2, bucket, records)
+
+    completed_at = datetime.now(timezone.utc)
+    status.update({
+        "completed_at": completed_at.isoformat(),
+        "duration_seconds": int((completed_at - started_at).total_seconds()),
+        "status": "success" if failed == 0 else "partial",
+        "added": added,
+        "removed": len(removed_records),
+        "failed": failed,
+        "orphans_cleaned": orphans_cleaned,
+        "total_records": len(records),
+    })
+    write_sync_status(r2, bucket, status)
 
     print(f"\n{'='*60}", flush=True)
     print("SYNC COMPLETE", flush=True)
@@ -518,8 +648,35 @@ def main():
     print(f"  Added: {added}", flush=True)
     print(f"  Removed: {len(removed_records)}", flush=True)
     print(f"  Failed: {failed}", flush=True)
+    print(f"  Orphan thumbnails cleaned: {orphans_cleaned}", flush=True)
     print(f"  Records now: {len(records)}", flush=True)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as e:
+        # Best-effort: record the failure so the UI status icon can show it.
+        print(f"\nSYNC FAILED: {e}", flush=True)
+        traceback.print_exc()
+        try:
+            r2 = get_r2_client()
+            bucket = get_env("R2_BUCKET_NAME")
+            now = datetime.now(timezone.utc)
+            write_sync_status(r2, bucket, {
+                "started_at": now.isoformat(),
+                "completed_at": now.isoformat(),
+                "duration_seconds": 0,
+                "status": "failed",
+                "added": 0,
+                "removed": 0,
+                "failed": 0,
+                "orphans_cleaned": 0,
+                "total_records": None,
+                "error": str(e),
+            })
+        except Exception as inner:
+            print(f"  Also failed to write sync-status.json: {inner}", flush=True)
+        sys.exit(1)

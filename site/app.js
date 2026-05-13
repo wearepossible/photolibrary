@@ -36,6 +36,7 @@
     document.getElementById("auth-gate").classList.add("hidden");
     document.body.classList.remove("locked");
     loadData();
+    refreshSyncStatus();
   }
 
   document.getElementById("auth-form").addEventListener("submit", async (e) => {
@@ -499,9 +500,16 @@
         headers: { "Authorization": `Bearer ${pw}` },
       });
 
+      const result = await res.json().catch(() => ({}));
+
       if (res.ok) {
-        const result = await res.json();
         showSyncStatus(result.message || "Sync started. New photos will appear in a few minutes.");
+        // Switch icon to "running" immediately rather than waiting for the next poll.
+        setIconState("running", "Sync just started. Refreshing status...");
+        startStatusPolling();
+      } else if (res.status === 409) {
+        showSyncStatus(result.message || "A sync is already running. Please wait for it to finish.");
+        startStatusPolling();
       } else {
         showSyncStatus("Failed to start sync. Please try again.");
       }
@@ -522,6 +530,145 @@
       el.hidden = true;
     }, 5000);
   }
+
+  // --- Sync status icon (tick / spinner / cross next to the Sync button) ---
+
+  let lastRunSummary = null; // cached from R2 sync-status.json
+  let statusPollTimer = null;
+
+  function setIconState(state, tooltipText) {
+    const icon = document.getElementById("sync-status-icon");
+    const tooltip = document.getElementById("sync-status-tooltip");
+    icon.dataset.state = state;
+    tooltip.textContent = tooltipText;
+    const btn = document.getElementById("sync-btn");
+    btn.disabled = state === "running";
+    btn.textContent = state === "running" ? "Syncing..." : "Sync";
+  }
+
+  function formatRelative(iso) {
+    if (!iso) return "";
+    const then = new Date(iso).getTime();
+    const diffMs = Date.now() - then;
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins} min ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+  }
+
+  function formatDuration(seconds) {
+    if (seconds == null) return "";
+    if (seconds < 60) return `${seconds}s`;
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return s ? `${m}m ${s}s` : `${m}m`;
+  }
+
+  function buildSuccessTooltip(summary) {
+    if (!summary) return "Last sync succeeded.";
+    const when = formatRelative(summary.completed_at);
+    const lines = [`Last sync ${when} — succeeded.`];
+    if (summary.added || summary.removed || summary.failed) {
+      const parts = [];
+      if (summary.added) parts.push(`${summary.added} added`);
+      if (summary.removed) parts.push(`${summary.removed} removed`);
+      if (summary.failed) parts.push(`${summary.failed} failed`);
+      lines.push(parts.join(", "));
+    } else {
+      lines.push("No changes.");
+    }
+    if (summary.duration_seconds != null) {
+      lines.push(`Took ${formatDuration(summary.duration_seconds)}.`);
+    }
+    return lines.join("\n");
+  }
+
+  function buildFailureTooltip(summary, lastRun) {
+    if (summary && summary.status === "failed" && summary.error) {
+      const when = formatRelative(summary.completed_at);
+      return `Last sync ${when} — failed.\n${summary.error}`;
+    }
+    if (lastRun) {
+      const when = formatRelative(lastRun.completed_at);
+      return `Last sync ${when} — ${lastRun.conclusion || "failed"}.\nSee the GitHub Actions run for details.`;
+    }
+    return "The last sync failed.";
+  }
+
+  function buildRunningTooltip(active) {
+    const when = active && active.started_at ? formatRelative(active.started_at) : "just now";
+    return `Sync in progress (started ${when}).`;
+  }
+
+  async function fetchLastRunSummary() {
+    try {
+      const url = DATA_URL ? `${DATA_URL}/sync-status.json?t=${Date.now()}` : "/data/sync-status.json";
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  async function refreshSyncStatus() {
+    let live;
+    try {
+      const res = await fetch("/.netlify/functions/sync-status");
+      if (!res.ok) {
+        setIconState("unknown", "Couldn't check sync status.");
+        return;
+      }
+      live = await res.json();
+    } catch {
+      setIconState("unknown", "Couldn't check sync status.");
+      return;
+    }
+
+    if (live.running) {
+      setIconState("running", buildRunningTooltip(live.active_run));
+      startStatusPolling();
+      return;
+    }
+
+    // No active run — refresh the summary from R2 so the tooltip is up to date.
+    lastRunSummary = await fetchLastRunSummary();
+
+    // Decide success vs failure. Prefer the R2 summary (richer detail);
+    // fall back to the GitHub Actions conclusion.
+    const r2Status = lastRunSummary && lastRunSummary.status;
+    const ghConclusion = live.last_run && live.last_run.conclusion;
+
+    const failed =
+      r2Status === "failed" ||
+      (r2Status == null && ghConclusion && ghConclusion !== "success");
+
+    if (failed) {
+      setIconState("failure", buildFailureTooltip(lastRunSummary, live.last_run));
+    } else if (r2Status === "success" || r2Status === "partial" || ghConclusion === "success") {
+      setIconState("success", buildSuccessTooltip(lastRunSummary));
+    } else {
+      setIconState("unknown", "No sync has run yet.");
+    }
+
+    stopStatusPolling();
+  }
+
+  function startStatusPolling() {
+    if (statusPollTimer) return;
+    statusPollTimer = setInterval(refreshSyncStatus, 15000);
+  }
+
+  function stopStatusPolling() {
+    if (statusPollTimer) {
+      clearInterval(statusPollTimer);
+      statusPollTimer = null;
+    }
+  }
+
 
   // --- Utilities ---
 

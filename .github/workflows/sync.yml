@@ -7,10 +7,17 @@ on:
   workflow_dispatch:
     # Allow manual trigger from GitHub UI or API
 
+# Only ever run one sync at a time. If a sync is already running when another
+# is triggered (cron or manual), the new one waits in the queue rather than
+# starting a competing run that would fight over data.json.
+concurrency:
+  group: sync-drive
+  cancel-in-progress: false
+
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository

@@ -136,7 +136,7 @@ Single-page app with integrated browsing and metadata editing:
 - **Browse**: thumbnail grid, click to expand
 - **Photo detail view**: shows thumbnail, all metadata, links to Drive (both file and containing folder), and lists all locations where the photo appears
 - **Metadata editor** (inline, behind password): edit keywords, description, alt text, campaign, credit for any photo. Save updates `data.json` in R2 via Netlify Function
-- **Sync button**: triggers a Drive re-scan via Netlify Function
+- **Sync button**: triggers a Drive re-scan via Netlify Function. A small status icon next to the button shows whether the last sync succeeded (tick), is currently running (spinner), or failed (cross); hovering reveals a summary of the last run.
 - **Mobile-friendly** responsive layout
 - **Brand**: Possible brand colours (#321D49 purple, #BF0978 magenta), Poppins font, no rounded corners
 
@@ -145,16 +145,47 @@ Single-page app with integrated browsing and metadata editing:
 Python sync script (`scripts/sync.py`) runs in GitHub Actions:
 1. Scans Drive for all image files (same logic as `scan_drive.py`)
 2. Fetches current `data.json` from R2 and compares
-3. For new files: downloads, generates thumbnail, uploads to R2, runs AI analysis, adds record
+3. For new files: downloads, generates thumbnail, uploads to R2, runs AI analysis, adds record. New files are processed in parallel (`PARALLEL_WORKERS = 5`) — slugs are pre-allocated serially before the parallel stage so workers don't race on slug uniqueness.
 4. For removed files: removes record from `data.json`, deletes thumbnail from R2
 5. For moved files: updates location info
 6. Writes updated `data.json` back to R2
+7. Cleans up orphan thumbnails in R2 — keys under `thumbnails/` that aren't referenced by any record. Orphans accumulate when a previous run died before `data.json` was written.
+8. Writes `sync-status.json` to R2 with the result summary (timestamps, counts, status, error message if any). The web UI reads this to populate the sync status icon tooltip.
 
 Triggered by:
 - Daily cron (6am UTC) via GitHub Actions
 - Manual "Sync now" button in the web UI (Netlify Function triggers GitHub Actions via `workflow_dispatch`)
 
+The workflow has a **concurrency lock** (`concurrency: group: sync-drive`) so only one sync can run at a time. If a second run is triggered while one is in progress (cron firing during a long manual run, or someone clicking Sync twice), the new run queues rather than racing. `sync-drive.js` also returns HTTP 409 (already running) when called during an active run so the UI can show a clear message.
+
+The workflow `timeout-minutes` is 30. Public repo → GitHub Actions minutes are unlimited; the 30-min cap is a safety net to bound Anthropic API spend in a runaway loop. With 5-way parallelism, 800 new photos finishes in roughly 5–10 minutes — well inside the cap.
+
 The Netlify Function (`sync-drive.js`) is a thin trigger — it calls the GitHub Actions API to start the workflow, avoiding the 10-second Netlify timeout. The Python script runs with no timeout constraints in GitHub Actions.
+
+#### Sync status icon
+
+Next to the Sync button is a small status icon:
+- **Tick (green)** — last sync succeeded. Hover shows when it ran, counts of photos added/removed/failed, and duration.
+- **Spinner** — a sync is currently running (the Sync button is disabled). Hover shows when it started.
+- **Cross (red)** — last sync failed. Hover shows when it ran and the error message (or links to the GitHub Actions run for details).
+- **Question mark** — status unknown (no sync has ever run, or the status endpoint returned an error).
+
+Driven by two sources:
+1. `/.netlify/functions/sync-status` — queries the GitHub Actions API for the workflow's current state (any queued/in-progress run) and the conclusion of the most recent completed run.
+2. `sync-status.json` in R2 — written by `scripts/sync.py` at the end of every run; contains the rich summary (counts, duration, error message).
+
+The frontend polls `/.netlify/functions/sync-status` every 15s while a sync is running, stops polling once the run completes, then refetches `sync-status.json` to show the fresh summary.
+
+#### Orphan thumbnail cleanup
+
+Every sync ends with an orphan cleanup pass: list every key under `thumbnails/` in R2, build the set of keys referenced by any record (primary + alternatives), delete the difference in batches of 1000 (S3 `delete_objects` limit).
+
+The same cleanup is also exposed as a standalone script for one-off use:
+
+```bash
+python scripts/cleanup_orphan_thumbnails.py --dry-run   # list orphans
+python scripts/cleanup_orphan_thumbnails.py             # delete them
+```
 
 ## Tech Stack
 
@@ -231,6 +262,7 @@ photo-library/
 │   ├── fix_rotated_thumbnails.py # One-off: fix EXIF rotation on thumbnails
 │   ├── upload_to_r2.py           # Phase 3: upload thumbnails + data.json to R2
 │   ├── sync.py                   # Ongoing sync: scan Drive, process changes, update R2
+│   ├── cleanup_orphan_thumbnails.py  # One-off: delete unreferenced thumbnails from R2
 │   └── utils.py                  # Shared helpers
 ├── site/
 │   ├── index.html                # Main interface (browse + search + metadata editor)
@@ -239,7 +271,8 @@ photo-library/
 │   └── Possible_Logo_White.png   # Logo for header
 ├── netlify/
 │   └── functions/
-│       ├── sync-drive.js         # Triggers GitHub Actions sync workflow
+│       ├── sync-drive.js         # Triggers GitHub Actions sync workflow (returns 409 if one is already running)
+│       ├── sync-status.js        # Reports current sync state (running / last conclusion) for the UI status icon
 │       ├── update-record.js      # Updates metadata for a photo in data.json
 │       ├── delete-record.js      # Removes a photo record from data.json
 │       └── verify-password.js    # Server-side password validation
@@ -259,6 +292,7 @@ thumbnails/
   └── ...
 data.json
 campaigns.json
+sync-status.json  # written by sync.py at the end of every run
 ```
 
 ## Potential Roadblocks and Difficulties
@@ -267,7 +301,7 @@ campaigns.json
 The Drive API requires `supportsAllDrives=True`, `includeItemsFromAllDrives=True`, and the `driveId` parameter on all calls, or it silently returns zero results. The service account must be added as a member of the Shared Drive. Rate limits are generous (20,000 queries/day) but the script includes backoff logic.
 
 ### 2. Netlify Function timeout for sync (SOLVED)
-The 10-second Netlify timeout was too tight for a full Drive scan. Solved by moving the sync to a Python script running in GitHub Actions (no timeout constraints). The Netlify Function now just triggers the GitHub Actions workflow via `workflow_dispatch`. For bulk initial processing, use the local Python scripts.
+The 10-second Netlify timeout was too tight for a full Drive scan. Solved by moving the sync to a Python script running in GitHub Actions. The Netlify Function now just triggers the workflow via `workflow_dispatch`. The workflow itself has a 30-minute cap as a safety net (not a hard performance ceiling — 5-way parallel processing keeps even an 800-photo burst inside it) and a concurrency lock so a second trigger queues rather than races. If a run does hit the cap, the next sync's orphan cleanup pass will remove any thumbnails it uploaded before dying. For bulk initial processing, use the local Python scripts.
 
 ### 3. Google Drive thumbnail links require auth
 Drive API thumbnail links (`thumbnailLink`) require authentication — they can't be used directly in a public web page. This is why we generate and host our own thumbnails in R2.

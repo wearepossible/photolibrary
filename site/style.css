@@ -258,6 +258,98 @@ header {
   color: #fff;
 }
 
+#sync-btn:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* ── Sync status icon ──────────────────────────────────────────────────── */
+
+.sync-control {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  position: relative;
+}
+
+.sync-status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.2);
+  cursor: help;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.sync-status-icon[data-state="success"] {
+  background: #2e9e5b;
+}
+.sync-status-icon[data-state="success"]::before {
+  content: "\2713"; /* tick */
+}
+
+.sync-status-icon[data-state="failure"] {
+  background: #c9384e;
+}
+.sync-status-icon[data-state="failure"]::before {
+  content: "\2715"; /* cross */
+}
+
+.sync-status-icon[data-state="running"] {
+  background: transparent;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  animation: sync-spin 0.9s linear infinite;
+  width: 0.9rem;
+  height: 0.9rem;
+}
+.sync-status-icon[data-state="running"]::before {
+  content: "";
+}
+
+.sync-status-icon[data-state="unknown"]::before {
+  content: "?";
+  color: rgba(255, 255, 255, 0.7);
+}
+
+@keyframes sync-spin {
+  to { transform: rotate(360deg); }
+}
+
+.sync-status-tooltip {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  background: #321D49;
+  color: #fff;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  white-space: pre-line;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  width: max-content;
+  max-width: 280px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+  z-index: 200;
+}
+
+.sync-status-icon:hover .sync-status-tooltip,
+.sync-status-icon:focus .sync-status-tooltip,
+.sync-status-icon:focus-within .sync-status-tooltip {
+  opacity: 1;
+}
+
 /* ── Grid ──────────────────────────────────────────────────────────────── */
 
 main {

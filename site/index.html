@@ -44,7 +44,12 @@
 
       <div class="header-actions">
         <span id="result-count" class="result-count" aria-live="polite"></span>
-        <button id="sync-btn">Sync</button>
+        <div class="sync-control">
+          <button id="sync-btn">Sync</button>
+          <span id="sync-status-icon" class="sync-status-icon" data-state="unknown" tabindex="0" aria-label="Sync status">
+            <span class="sync-status-tooltip" id="sync-status-tooltip" role="tooltip">Checking sync status...</span>
+          </span>
+        </div>
       </div>
     </div>
   </header>
