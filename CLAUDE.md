@@ -147,7 +147,7 @@ Python sync script (`scripts/sync.py`) runs in GitHub Actions:
 2. Fetches current `data.json` from R2 and compares
 3. For new files: downloads, generates thumbnail, uploads to R2, runs AI analysis, adds record. New files are processed in parallel (`PARALLEL_WORKERS = 5`) — slugs are pre-allocated serially before the parallel stage so workers don't race on slug uniqueness.
 4. For removed files: removes record from `data.json`, deletes thumbnail from R2
-5. For moved files: updates location info
+5. For renamed/moved files: refreshes `original_filename`, `folder_path`, `folder_id`, and dimensions on each kept location and alternative from the latest Drive scan. Files are identified by Drive file ID (which is stable across renames and moves) — this keeps search and the "Locations on Drive" panel accurate when users rename files or reorganise folders.
 6. Writes updated `data.json` back to R2
 7. Cleans up orphan thumbnails in R2 — keys under `thumbnails/` that aren't referenced by any record. Orphans accumulate when a previous run died before `data.json` was written.
 8. Writes `sync-status.json` to R2 with the result summary (timestamps, counts, status, error message if any). The web UI reads this to populate the sync status icon tooltip.
