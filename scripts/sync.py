@@ -530,9 +530,14 @@ def main():
             else:
                 new_files.append(f)
 
-    # Find removed records (all locations gone from Drive)
+    # Find removed records (all locations gone from Drive). For kept records,
+    # refresh location/alternative metadata from the latest Drive scan so that
+    # renames and folder moves are reflected in search and the UI.
+    drive_by_id = {f["id"]: f for f in drive_files}
     removed_records = []
     kept_records = []
+    renames = 0
+    moves = 0
     for r in records:
         locs_on_drive = [l for l in r.get("locations", []) if l["drive_file_id"] in drive_file_ids]
         alts_on_drive = [a for a in r.get("alternatives", []) if a["drive_file_id"] in drive_file_ids]
@@ -540,13 +545,52 @@ def main():
         if not locs_on_drive and not alts_on_drive:
             removed_records.append(r)
         else:
+            for loc in locs_on_drive:
+                df = drive_by_id.get(loc["drive_file_id"])
+                if not df:
+                    continue
+                new_folder_id = df.get("parent_id", "")
+                new_folder_path = df.get("folder_path", "")
+                if loc.get("folder_id") != new_folder_id or loc.get("folder_path") != new_folder_path:
+                    moves += 1
+                loc["folder_id"] = new_folder_id
+                loc["folder_path"] = new_folder_path
+                loc["file_size_bytes"] = df.get("size", loc.get("file_size_bytes", 0))
+                if df.get("width"):
+                    loc["width"] = df["width"]
+                if df.get("height"):
+                    loc["height"] = df["height"]
+
+            for alt in alts_on_drive:
+                df = drive_by_id.get(alt["drive_file_id"])
+                if not df:
+                    continue
+                if alt.get("folder_path") != df.get("folder_path", ""):
+                    moves += 1
+                alt["folder_path"] = df.get("folder_path", "")
+                alt["file_size_bytes"] = df.get("size", alt.get("file_size_bytes", 0))
+                if df.get("width"):
+                    alt["width"] = df["width"]
+                if df.get("height"):
+                    alt["height"] = df["height"]
+                if df.get("name") and alt.get("original_filename") != df["name"]:
+                    renames += 1
+                    alt["original_filename"] = df["name"]
+
             r["locations"] = locs_on_drive
             r["alternatives"] = alts_on_drive
-            # Update top-level links if best location changed
+            # Update top-level fields from the best (first) location.
             if locs_on_drive:
+                best_df = drive_by_id.get(locs_on_drive[0]["drive_file_id"])
+                if best_df and best_df.get("name") and r.get("original_filename") != best_df["name"]:
+                    renames += 1
+                    r["original_filename"] = best_df["name"]
                 r["drive_file_url"] = f"https://drive.google.com/file/d/{locs_on_drive[0]['drive_file_id']}/view"
                 r["drive_folder_url"] = f"https://drive.google.com/drive/folders/{locs_on_drive[0].get('folder_id', '')}"
             kept_records.append(r)
+
+    if renames or moves:
+        print(f"  Refreshed metadata: {renames} renames, {moves} moves", flush=True)
 
     print(f"\nSync summary:", flush=True)
     print(f"  New files to process: {len(new_files)}", flush=True)
@@ -565,6 +609,8 @@ def main():
                 print(f"  - {r['original_filename']} ({r['id']})", flush=True)
             if len(removed_records) > 20:
                 print(f"  ... and {len(removed_records) - 20} more", flush=True)
+        if renames or moves:
+            print(f"\nMetadata refreshes that would be applied: {renames} renames, {moves} moves", flush=True)
         print("\nDry run — no changes made.", flush=True)
         return
 
@@ -633,7 +679,7 @@ def main():
                 print(f"  Progress: {i}/{len(file_slugs)} ({added} added, {failed} failed)", flush=True)
 
     # Upload updated data.json and campaigns.json
-    if new_files or removed_records:
+    if new_files or removed_records or renames or moves:
         print(f"\nUploading updated data.json ({len(records)} records)...", flush=True)
         upload_data_json(r2, bucket, records)
         upload_campaigns_json(r2, bucket, records)
@@ -650,6 +696,8 @@ def main():
         "status": "success" if failed == 0 else "partial",
         "added": added,
         "removed": len(removed_records),
+        "renamed": renames,
+        "moved": moves,
         "failed": failed,
         "orphans_cleaned": orphans_cleaned,
         "total_records": len(records),
@@ -663,6 +711,8 @@ def main():
     print(f"  Records before: {len(kept_records) + len(removed_records)}", flush=True)
     print(f"  Added: {added}", flush=True)
     print(f"  Removed: {len(removed_records)}", flush=True)
+    print(f"  Renamed: {renames}", flush=True)
+    print(f"  Moved: {moves}", flush=True)
     print(f"  Failed: {failed}", flush=True)
     print(f"  Orphan thumbnails cleaned: {orphans_cleaned}", flush=True)
     print(f"  Records now: {len(records)}", flush=True)

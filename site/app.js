@@ -575,10 +575,12 @@
     if (!summary) return "Last sync succeeded.";
     const when = formatRelative(summary.completed_at);
     const lines = [`Last sync ${when} — succeeded.`];
-    if (summary.added || summary.removed || summary.failed) {
+    if (summary.added || summary.removed || summary.renamed || summary.moved || summary.failed) {
       const parts = [];
       if (summary.added) parts.push(`${summary.added} added`);
       if (summary.removed) parts.push(`${summary.removed} removed`);
+      if (summary.renamed) parts.push(`${summary.renamed} renamed`);
+      if (summary.moved) parts.push(`${summary.moved} moved`);
       if (summary.failed) parts.push(`${summary.failed} failed`);
       lines.push(parts.join(", "));
     } else {
