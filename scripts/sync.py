@@ -22,6 +22,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -80,6 +81,19 @@ Return ONLY the JSON object, no other text."""
 
 
 # --- Service clients ---
+
+# googleapiclient's Drive service is built on httplib2, which is NOT thread-safe
+# (one underlying socket is shared across threads, causing SSL corruption). Give
+# each worker thread its own client via threading.local.
+_thread_local = threading.local()
+
+
+def get_thread_drive():
+    """Return a Drive service unique to the current thread."""
+    if not hasattr(_thread_local, "drive"):
+        _thread_local.drive = get_drive_service()
+    return _thread_local.drive
+
 
 def get_drive_service():
     """Build Google Drive API client.
@@ -305,12 +319,14 @@ def analyse_image(client, thumb_bytes):
         return None
 
 
-def process_new_file(file_info, drive, r2, bucket, public_url, ai_client, slug):
+def process_new_file(file_info, r2, bucket, public_url, ai_client, slug):
     """Process a single new file: download, thumbnail, AI analysis, upload.
 
     The caller pre-allocates ``slug`` to keep this function free of shared
-    mutable state so it can be run in parallel.
+    mutable state so it can be run in parallel. The Drive client is
+    instantiated per-thread (googleapiclient is not thread-safe).
     """
+    drive = get_thread_drive()
     name = file_info["name"]
     try:
         image_bytes = download_from_drive(drive, file_info["id"])
@@ -598,7 +614,7 @@ def main():
     with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as pool:
         futures = {
             pool.submit(
-                process_new_file, f, drive, r2, bucket, public_url, ai_client, slug
+                process_new_file, f, r2, bucket, public_url, ai_client, slug
             ): f
             for f, slug in file_slugs
         }
