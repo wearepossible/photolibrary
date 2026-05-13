@@ -1,10 +1,36 @@
 // Sync Drive: triggers the GitHub Actions sync workflow.
-// The actual sync runs in GitHub Actions (no timeout issues).
+// The actual sync runs in GitHub Actions (no timeout issues there).
+//
+// The workflow has a concurrency lock so a second triggered run will queue
+// rather than race the in-progress one, but we still check here so the UI
+// can show a clear "already running" message instead of silently queueing.
+
+const REPO = "wearepossible/photolibrary";
+const WORKFLOW = "sync.yml";
 
 function checkAuth(event) {
   const auth = event.headers.authorization || "";
   const token = auth.replace("Bearer ", "");
   return token === process.env.ADMIN_PASSWORD;
+}
+
+async function isSyncRunning(pat) {
+  // List recent runs and check whether any is queued or in_progress.
+  const res = await fetch(
+    `https://api.github.com/repos/${REPO}/actions/workflows/${WORKFLOW}/runs?per_page=5`,
+    {
+      headers: {
+        "Authorization": `Bearer ${pat}`,
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    }
+  );
+  if (!res.ok) return false;
+  const data = await res.json();
+  return (data.workflow_runs || []).some(
+    (r) => r.status === "queued" || r.status === "in_progress"
+  );
 }
 
 exports.handler = async (event) => {
@@ -25,8 +51,19 @@ exports.handler = async (event) => {
   }
 
   try {
+    if (await isSyncRunning(pat)) {
+      return {
+        statusCode: 409,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: "A sync is already running. Please wait for it to finish.",
+          already_running: true,
+        }),
+      };
+    }
+
     const res = await fetch(
-      "https://api.github.com/repos/wearepossible/photolibrary/actions/workflows/sync.yml/dispatches",
+      `https://api.github.com/repos/${REPO}/actions/workflows/${WORKFLOW}/dispatches`,
       {
         method: "POST",
         headers: {
