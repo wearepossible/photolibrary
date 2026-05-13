@@ -490,7 +490,8 @@
   document.getElementById("sync-btn").addEventListener("click", async () => {
     const btn = document.getElementById("sync-btn");
     btn.disabled = true;
-    btn.textContent = "Syncing...";
+    const label = btn.querySelector(".sync-btn-label");
+    if (label) label.textContent = "Syncing...";
     showSyncStatus("Starting sync...");
 
     try {
@@ -519,7 +520,7 @@
     }
 
     btn.disabled = false;
-    btn.textContent = "Sync";
+    if (label) label.textContent = "Sync";
   });
 
   function showSyncStatus(message) {
@@ -543,7 +544,10 @@
     tooltip.textContent = tooltipText;
     const btn = document.getElementById("sync-btn");
     btn.disabled = state === "running";
-    btn.textContent = state === "running" ? "Syncing..." : "Sync";
+    const label = btn.querySelector(".sync-btn-label");
+    if (label) {
+      label.textContent = state === "running" ? "Syncing..." : "Sync";
+    }
   }
 
   function formatRelative(iso) {
