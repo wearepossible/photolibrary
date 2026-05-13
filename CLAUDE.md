@@ -187,6 +187,18 @@ python scripts/cleanup_orphan_thumbnails.py --dry-run   # list orphans
 python scripts/cleanup_orphan_thumbnails.py             # delete them
 ```
 
+#### Re-analysing records with missing metadata
+
+If a sync exhausts Anthropic credits (or otherwise fails at the AI step) partway through, the affected photos land in `data.json` with empty `keywords` / `description` / `alt_text` but their thumbnails are already in R2. The regular sync won't re-process them — sync only looks at *new* Drive file IDs.
+
+A standalone script handles this case: it finds records missing AI metadata, fetches their thumbnails directly from R2 (no Drive round-trip), runs Claude on them in parallel, and writes the updated `data.json` back.
+
+```bash
+python scripts/reanalyse_missing.py --dry-run          # list candidates
+python scripts/reanalyse_missing.py --limit 10         # test with 10 first
+python scripts/reanalyse_missing.py                    # process all
+```
+
 ## Tech Stack
 
 - **Migration scripts**: Python (google-api-python-client, anthropic SDK, Pillow, imagehash, boto3)
@@ -263,6 +275,7 @@ photo-library/
 │   ├── upload_to_r2.py           # Phase 3: upload thumbnails + data.json to R2
 │   ├── sync.py                   # Ongoing sync: scan Drive, process changes, update R2
 │   ├── cleanup_orphan_thumbnails.py  # One-off: delete unreferenced thumbnails from R2
+│   ├── reanalyse_missing.py      # One-off: re-run AI analysis on records with empty keywords/description
 │   └── utils.py                  # Shared helpers
 ├── site/
 │   ├── index.html                # Main interface (browse + search + metadata editor)
