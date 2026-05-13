@@ -273,18 +273,17 @@ header {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 0.85rem;
-  height: 0.85rem;
+  width: 1rem;
+  height: 1rem;
   border-radius: 50%;
-  font-size: 0.55rem;
+  font-size: 0.7rem;
   font-weight: 700;
   line-height: 1;
   color: currentColor;
-  border: 1px solid currentColor;
+  border: 1.5px solid currentColor;
   background: transparent;
   flex-shrink: 0;
   position: relative;
-  opacity: 0.85;
 }
 
 .sync-status-icon[data-state="success"]::before {
@@ -296,7 +295,7 @@ header {
 }
 
 .sync-status-icon[data-state="running"] {
-  border: 2px solid rgba(255, 255, 255, 0.25);
+  border: 2px solid rgba(255, 255, 255, 0.2);
   border-top-color: currentColor;
   animation: sync-spin 0.9s linear infinite;
 }
