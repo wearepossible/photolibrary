@@ -1,14 +1,15 @@
 name: Sync Google Drive
 
+# Started only on request: by the Sync button, by the daily Netlify scheduled
+# function (netlify/functions/scheduled-sync.js, 06:00 UTC), or from the
+# GitHub UI. There is deliberately no `schedule:` trigger here, because GitHub
+# switches off scheduled workflows in public repos after 60 days without a
+# commit, which silently stopped the daily sync between July and October 2026.
 on:
-  schedule:
-    # Run daily at 6am UTC (7am BST / 6am GMT)
-    - cron: '0 6 * * *'
   workflow_dispatch:
-    # Allow manual trigger from GitHub UI or API
 
 # Only ever run one sync at a time. If a sync is already running when another
-# is triggered (cron or manual), the new one waits in the queue rather than
+# is triggered (daily or manual), the new one waits in the queue rather than
 # starting a competing run that would fight over data.json.
 concurrency:
   group: sync-drive

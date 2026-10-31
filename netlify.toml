@@ -7,3 +7,8 @@
   [headers.values]
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
+
+# Daily Drive sync. Netlify cron times are UTC. See scheduled-sync.js for why
+# the schedule lives here rather than in the GitHub workflow.
+[functions."scheduled-sync"]
+  schedule = "0 6 * * *"

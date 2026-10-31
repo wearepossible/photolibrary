@@ -10,7 +10,7 @@ Building a searchable, password-protected photo library for a climate charity. P
 - **Data**: `data.json` stored in Cloudflare R2 (not in Git — updated by sync functions)
 - **Image originals**: Stay on Google Drive (no migration needed)
 - **Thumbnails**: Generated during sync, stored in Cloudflare R2 (free tier, minimal storage — ~50MB for ~1000 photos)
-- **Sync backend**: GitHub Actions (triggered by Netlify Function or daily cron) — runs Python sync script that scans Drive for new/removed files, generates thumbnails, triggers AI analysis for new photos
+- **Sync backend**: GitHub Actions (started by the Sync button or a daily Netlify scheduled function) — runs Python sync script that scans Drive for new/removed files, generates thumbnails, triggers AI analysis for new photos
 - **Image analysis (initial bulk)**: Claude API (Haiku 4.5) — ~$3 for ~1000 images
 - **Image analysis (ongoing new photos)**: Claude API (Haiku 4.5) — triggered during sync, only for photos not yet analysed
 - **Password protection**: A simple login page that checks the password with the `verify-password` Netlify Function, so the password (and any hash of it) never appears in the public code. A deterrent for casual access, not real security: `data.json` and thumbnails are publicly readable in R2. The same password is checked again by every function that edits, deletes or syncs.
@@ -94,7 +94,7 @@ All metadata fields (`keywords`, `description`, `alt_text`) are editable in the 
 ### Ongoing Operation
 
 - **Users upload photos to Google Drive** as they already do — no new workflow to learn
-- **Scheduled sync** (GitHub Actions, daily at 6am UTC) runs Python sync script:
+- **Scheduled sync** (daily at 6am UTC, started by a Netlify scheduled function) runs Python sync script in GitHub Actions:
   - New files → generate thumbnail, run AI analysis, add to `data.json`
   - Removed files → remove from `data.json`, delete thumbnail from R2
   - Dedup check on new files (MD5 match against existing records)
@@ -153,14 +153,14 @@ Python sync script (`scripts/sync.py`) runs in GitHub Actions:
 8. Writes `sync-status.json` to R2 with the result summary (timestamps, counts, status, error message if any). The web UI reads this to populate the sync status icon tooltip.
 
 Triggered by:
-- Daily cron (6am UTC) via GitHub Actions
+- Daily at 6am UTC by the Netlify scheduled function `scheduled-sync.js` (schedule set in `netlify.toml`)
 - Manual "Sync now" button in the web UI (Netlify Function triggers GitHub Actions via `workflow_dispatch`)
 
 The workflow has a **concurrency lock** (`concurrency: group: sync-drive`) so only one sync can run at a time. If a second run is triggered while one is in progress (cron firing during a long manual run, or someone clicking Sync twice), the new run queues rather than racing. `sync-drive.js` also returns HTTP 409 (already running) when called during an active run so the UI can show a clear message.
 
-The workflow `timeout-minutes` is 30. The 30-min cap is a safety net to bound Anthropic API spend in a runaway loop, and it also bounds GitHub Actions minutes: the repo is private, so runs count against the organisation's free monthly allowance (2,000 minutes on a free plan). Even a run hitting the cap every day would use about 900.
+The workflow `timeout-minutes` is 30. Public repo → GitHub Actions minutes are unlimited; the 30-min cap is a safety net to bound Anthropic API spend in a runaway loop.
 
-The repo is private because GitHub switches off scheduled workflows in *public* repos after 60 days without a commit. That happened between July and October 2026: the daily sync silently stopped, and the Sync button failed because GitHub refuses to start a disabled workflow. Private repos aren't subject to that rule. If the repo is ever made public again, the daily sync will need a keep-alive. With 5-way parallelism, 800 new photos finishes in roughly 5–10 minutes — well inside the cap.
+**Why the daily trigger is a Netlify function, not a GitHub schedule.** GitHub switches off scheduled workflows in public repos after 60 days without a commit. That happened between July and October 2026: the daily sync silently stopped, and the Sync button failed because GitHub refuses to start a disabled workflow. Making the repo private would avoid the rule, but Netlify only builds from organisation-owned private repos on its Pro plan. So the workflow has no `schedule:` trigger, and the Netlify scheduled function `scheduled-sync.js` starts it each morning instead. Netlify runs scheduled functions only on the published site; to test one on a deploy preview, use **Run now** on the function's page in the Netlify UI. With 5-way parallelism, 800 new photos finishes in roughly 5–10 minutes — well inside the cap.
 
 The Netlify Function (`sync-drive.js`) is a thin trigger — it calls the GitHub Actions API to start the workflow, avoiding the 10-second Netlify timeout. The Python script runs with no timeout constraints in GitHub Actions.
 
@@ -204,7 +204,7 @@ python scripts/reanalyse_missing.py                    # process all
 ## Tech Stack
 
 - **Migration scripts**: Python (google-api-python-client, anthropic SDK, Pillow, imagehash, boto3)
-- **Sync**: Python script via GitHub Actions (daily cron + manual trigger)
+- **Sync**: Python script via GitHub Actions (daily Netlify scheduled function + manual trigger)
 - **Static site**: Vanilla HTML/CSS/JS (no build step)
 - **Backend functions**: Netlify Functions (JavaScript/Node.js) — metadata editing + sync trigger
 - **Thumbnails + data**: Cloudflare R2 via S3-compatible API
@@ -265,7 +265,7 @@ photo-library/
 ├── .env                          # Local migration keys (gitignored)
 ├── .github/
 │   └── workflows/
-│       └── sync.yml              # GitHub Actions: daily cron + manual sync trigger
+│       └── sync.yml              # GitHub Actions: the sync job (started on request only, no schedule)
 ├── scripts/
 │   ├── scan_drive.py             # Phase 1: scan Shared Drive, catalogue all images
 │   ├── dedup_and_filter.py       # Phase 1: dedup passes + logo filtering, produce report
@@ -286,17 +286,20 @@ photo-library/
 │   └── Possible_Logo_White.png   # Logo for header
 ├── netlify/
 │   └── functions/
-│       ├── sync-drive.js         # Triggers GitHub Actions sync workflow (returns 409 if one is already running)
+│       ├── sync-drive.js         # Sync button: triggers GitHub Actions sync workflow (returns 409 if one is already running)
+│       ├── scheduled-sync.js     # Daily trigger for the same workflow (schedule in netlify.toml)
 │       ├── sync-status.js        # Reports current sync state (running / last conclusion) for the UI status icon
 │       ├── update-record.js      # Updates metadata for a photo in data.json
 │       ├── delete-record.js      # Removes a photo record from data.json
 │       └── verify-password.js    # Server-side password validation
+│   └── lib/
+│       └── github-sync.js        # Shared GitHub calls for sync-drive.js and scheduled-sync.js
 ├── data/
 │   ├── drive_scan_report.json    # Full scan results (intermediate, gitignored)
 │   ├── dedup_report.html         # Human-readable dedup review report (gitignored)
 │   ├── dedup_summary.json        # Structured dedup data (gitignored)
 │   └── thumbnails_cache/         # Cached thumbnails during migration (gitignored)
-└── netlify.toml                  # Netlify config (functions directory, redirects)
+└── netlify.toml                  # Netlify config (functions directory, headers, daily sync schedule)
 ```
 
 **In R2 bucket:**

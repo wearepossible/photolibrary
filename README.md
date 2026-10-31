@@ -20,7 +20,7 @@ Photos live on a shared Google Drive. This library provides a browsable, searcha
 | Thumbnails + data | [Cloudflare R2](https://www.cloudflare.com/r2/) |
 | Image originals | Google Drive (Shared Drive) |
 | Backend functions | Netlify Functions (metadata editing, sync trigger) |
-| Sync | Python script via [GitHub Actions](https://github.com/features/actions) (daily cron + manual) |
+| Sync | Python script via [GitHub Actions](https://github.com/features/actions), started daily by a Netlify scheduled function or manually |
 | Image analysis | Claude API (Haiku 4.5) |
 
 Running cost: **$0/month** (all free tiers).
