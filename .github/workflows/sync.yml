@@ -14,6 +14,11 @@ concurrency:
   group: sync-drive
   cancel-in-progress: false
 
+# The job writes to R2 with its own keys and never writes to this repo, so
+# the workflow's GitHub token only needs to read it.
+permissions:
+  contents: read
+
 jobs:
   sync:
     runs-on: ubuntu-latest

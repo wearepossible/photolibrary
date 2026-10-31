@@ -85,7 +85,7 @@ Push to `main` — Netlify auto-deploys from the `site/` directory. Set environm
 - **R2 for data** — `data.json` lives in R2 (not Git) because it's updated by sync functions and metadata edits
 - **Thumbnails in R2** — Drive API thumbnail links require auth, so we host our own
 - **GitHub Actions for sync** — Netlify Functions have a 10-second timeout, too short for scanning 2000+ Drive files. The sync runs as a Python script in GitHub Actions with no timeout constraints. The Netlify Function is a thin trigger that calls the GitHub Actions API.
-- **Client-side password** — not real security, just a deterrent for casual access. Server-side validation on all Netlify Functions
+- **Shared password** — checked server-side and never in the page code. A deterrent for casual access, not real security: the photo data and thumbnails are publicly readable in R2. Every function that edits, deletes or syncs checks the password again
 - **AI metadata is editable** — Claude generates initial keywords/descriptions, but anyone with the password can overwrite them
 - **AI description cleanup** — post-processing rules strip overused AI-isms (e.g. "diverse", "vibrant", "appears to be") from generated descriptions
 

@@ -7,8 +7,6 @@
   const DATA_URL = "https://pub-b79e8a0629114570b848bf966ccd417c.r2.dev";
   const AUTH_KEY = "photo-library-auth";
   const BATCH_SIZE = 60;
-  // SHA-256 hash of the password "showmethepics"
-  const PASSWORD_HASH = "1bfaf1250f4b09e72d411aaa63675e51cc5e2221cd86290bd8d4c5b64c94997d";
 
   let allPhotos = [];
   let filteredPhotos = [];
@@ -17,16 +15,15 @@
   let editingField = null;
 
   // --- Authentication ---
-
-  async function sha256(str) {
-    const buf = await crypto.subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(str)
-    );
-    return Array.from(new Uint8Array(buf))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-  }
+  //
+  // The password is checked by the verify-password Netlify Function against
+  // the ADMIN_PASSWORD environment variable, so nothing about it (not even a
+  // hash) appears in this public code. The same password then authorises
+  // edits, deletes and syncs, which the other functions check again.
+  //
+  // This is still a soft gate: data.json and thumbnails are publicly readable
+  // in R2. It keeps casual visitors out of the interface and, more
+  // importantly, keeps editing in the hands of people who know the password.
 
   function checkAuth() {
     return sessionStorage.getItem(AUTH_KEY) === "true";
@@ -42,43 +39,34 @@
   document.getElementById("auth-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const pw = document.getElementById("auth-password").value;
-    const hash = await sha256(pw);
+    const errorEl = document.getElementById("auth-error");
+    errorEl.hidden = true;
 
-    if (hash === PASSWORD_HASH) {
+    // Any failure keeps the gate closed. In particular, a server or network
+    // error must not let someone in; for local development, run the site
+    // with `netlify dev` so the functions are available.
+    let res;
+    try {
+      res = await fetch("/.netlify/functions/verify-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: pw }),
+      });
+    } catch (err) {
+      console.error("Password check failed:", err);
+      res = null;
+    }
+
+    if (res && res.ok) {
       sessionStorage.setItem(AUTH_KEY, "true");
       sessionStorage.setItem("pw", pw);
       showApp();
+    } else if (res && res.status === 401) {
+      errorEl.textContent = "Incorrect password. Please try again.";
+      errorEl.hidden = false;
     } else {
-      // Try server-side verification as fallback (for local dev or changed password)
-      try {
-        const res = await fetch("/.netlify/functions/verify-password", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ password: pw }),
-        });
-
-        if (res.ok) {
-          sessionStorage.setItem(AUTH_KEY, "true");
-          sessionStorage.setItem("pw", pw);
-          showApp();
-        } else if (res.status === 401) {
-          document.getElementById("auth-error").hidden = false;
-        } else {
-          // Server unavailable (local dev) — accept any non-empty password
-          if (pw) {
-            sessionStorage.setItem(AUTH_KEY, "true");
-            sessionStorage.setItem("pw", pw);
-            showApp();
-          }
-        }
-      } catch {
-        // Network error — accept any non-empty password for local dev
-        if (pw) {
-          sessionStorage.setItem(AUTH_KEY, "true");
-          sessionStorage.setItem("pw", pw);
-          showApp();
-        }
-      }
+      errorEl.textContent = "Couldn't check the password just now. Please try again in a moment.";
+      errorEl.hidden = false;
     }
   });
 
@@ -339,7 +327,7 @@
     (photo.locations || []).forEach((loc) => {
       const li = document.createElement("li");
       li.innerHTML = `
-        <a href="https://drive.google.com/file/d/${loc.drive_file_id}/view" target="_blank" rel="noopener">
+        <a href="https://drive.google.com/file/d/${encodeURIComponent(loc.drive_file_id)}/view" target="_blank" rel="noopener">
           ${escapeHtml(loc.folder_path || "Unknown folder")}
         </a>
         <span class="location-size">
@@ -687,10 +675,24 @@
     return a;
   }
 
+  /**
+   * Escape text for safe insertion into HTML, both as element content and
+   * inside quoted attribute values (e.g. title="..."). Filenames come from
+   * whoever uploads to the shared Drive and descriptions can be edited, so
+   * neither can be trusted as markup.
+   *
+   * The common textContent/innerHTML trick isn't enough on its own: it
+   * escapes & < > but leaves quote marks alone, so a value containing "
+   * could close an attribute and add its own (an onmouseover handler that
+   * reads the password from sessionStorage, say).
+   */
   function escapeHtml(str) {
-    const div = document.createElement("div");
-    div.textContent = str;
-    return div.innerHTML;
+    return String(str ?? "")
+      .replace(/&/g, "&amp;") // must come first, or it would re-escape the others
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   function formatFileSize(bytes) {

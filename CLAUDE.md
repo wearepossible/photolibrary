@@ -13,7 +13,7 @@ Building a searchable, password-protected photo library for a climate charity. P
 - **Sync backend**: GitHub Actions (triggered by Netlify Function or daily cron) — runs Python sync script that scans Drive for new/removed files, generates thumbnails, triggers AI analysis for new photos
 - **Image analysis (initial bulk)**: Claude API (Haiku 4.5) — ~$3 for ~1000 images
 - **Image analysis (ongoing new photos)**: Claude API (Haiku 4.5) — triggered during sync, only for photos not yet analysed
-- **Password protection**: Client-side JS gate (a simple login page that checks a hardcoded password before revealing content — not real security, just a deterrent for casual access). Server-side validation on all Netlify Functions.
+- **Password protection**: A simple login page that checks the password with the `verify-password` Netlify Function, so the password (and any hash of it) never appears in the public code. A deterrent for casual access, not real security: `data.json` and thumbnails are publicly readable in R2. The same password is checked again by every function that edits, deletes or syncs.
 
 ## Data Model
 
@@ -131,7 +131,7 @@ All metadata fields (`keywords`, `description`, `alt_text`) are editable in the 
 
 Single-page app with integrated browsing and metadata editing:
 
-- **Password gate**: simple password input on first visit; stored in sessionStorage
+- **Password gate**: simple password input on first visit, checked by the `verify-password` function; stored in sessionStorage. Any error keeps the gate closed (run `netlify dev` locally so the functions are available)
 - **Search**: single text input with relevancy-ranked results, searching keywords, description, campaign, credit, alt text, folder path, and filename
 - **Browse**: thumbnail grid, click to expand
 - **Photo detail view**: shows thumbnail, all metadata, links to Drive (both file and containing folder), and lists all locations where the photo appears
@@ -325,8 +325,10 @@ The filtering heuristics (dimensions, folder names, file type) catch most cases,
 ### 5. R2 CORS configuration
 The Netlify site needs to fetch `data.json` and thumbnails from R2. CORS rules must be configured explicitly on the R2 bucket.
 
-### 6. Client-side password is not secure
-Anyone who views the page source can find the password. Acceptable for a low-sensitivity internal archive. Cloudflare Access (free for up to 50 users) can be added later if needed.
+### 6. The password gate is not real security
+The password is checked server-side and isn't in the page source, but `data.json` and thumbnails are publicly readable from R2 by anyone who finds the bucket URL. Acceptable for a low-sensitivity internal archive. Cloudflare Access (free for up to 50 users) can be added later if needed.
+
+Because the same password authorises editing, deleting and syncing, it should be long and hard to guess (four or five random words, say): nothing limits how many guesses the functions accept. Never put it, or a hash of it, in the code.
 
 ### 7. Concurrent metadata edits
 If two people edit metadata at the same time, one edit could be lost. Use R2's `onlyIf` conditional headers (ETag-based optimistic locking) with automatic read-merge-retry (up to 3 attempts).
