@@ -261,7 +261,6 @@ photo-library/
 ├── CLAUDE.md
 ├── README.md
 ├── .env                          # Local migration keys (gitignored)
-├── requirements.txt              # Python dependencies for migration
 ├── .github/
 │   └── workflows/
 │       └── sync.yml              # GitHub Actions: daily cron + manual sync trigger
@@ -276,7 +275,8 @@ photo-library/
 │   ├── sync.py                   # Ongoing sync: scan Drive, process changes, update R2
 │   ├── cleanup_orphan_thumbnails.py  # One-off: delete unreferenced thumbnails from R2
 │   ├── reanalyse_missing.py      # One-off: re-run AI analysis on records with empty keywords/description
-│   └── utils.py                  # Shared helpers
+│   ├── utils.py                  # Shared helpers
+│   └── requirements.txt          # Python dependencies for the scripts and sync (kept out of the repo root so Netlify doesn't install them on every deploy)
 ├── site/
 │   ├── index.html                # Main interface (browse + search + metadata editor)
 │   ├── style.css

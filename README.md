@@ -39,7 +39,7 @@ Running cost: **$0/month** (all free tiers).
 
 ```bash
 # Install Python dependencies
-pip install -r requirements.txt
+pip install -r scripts/requirements.txt
 
 # Copy .env.example to .env and fill in credentials
 cp .env.example .env
