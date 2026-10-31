@@ -158,7 +158,9 @@ Triggered by:
 
 The workflow has a **concurrency lock** (`concurrency: group: sync-drive`) so only one sync can run at a time. If a second run is triggered while one is in progress (cron firing during a long manual run, or someone clicking Sync twice), the new run queues rather than racing. `sync-drive.js` also returns HTTP 409 (already running) when called during an active run so the UI can show a clear message.
 
-The workflow `timeout-minutes` is 30. Public repo → GitHub Actions minutes are unlimited; the 30-min cap is a safety net to bound Anthropic API spend in a runaway loop. With 5-way parallelism, 800 new photos finishes in roughly 5–10 minutes — well inside the cap.
+The workflow `timeout-minutes` is 30. The 30-min cap is a safety net to bound Anthropic API spend in a runaway loop, and it also bounds GitHub Actions minutes: the repo is private, so runs count against the organisation's free monthly allowance (2,000 minutes on a free plan). Even a run hitting the cap every day would use about 900.
+
+The repo is private because GitHub switches off scheduled workflows in *public* repos after 60 days without a commit. That happened between July and October 2026: the daily sync silently stopped, and the Sync button failed because GitHub refuses to start a disabled workflow. Private repos aren't subject to that rule. If the repo is ever made public again, the daily sync will need a keep-alive. With 5-way parallelism, 800 new photos finishes in roughly 5–10 minutes — well inside the cap.
 
 The Netlify Function (`sync-drive.js`) is a thin trigger — it calls the GitHub Actions API to start the workflow, avoiding the 10-second Netlify timeout. The Python script runs with no timeout constraints in GitHub Actions.
 
