@@ -2,7 +2,6 @@
   "name": "possible-photo-library",
   "private": true,
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.0.0",
-    "googleapis": "^130.0.0"
+    "@aws-sdk/client-s3": "^3.0.0"
   }
 }

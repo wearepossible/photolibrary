@@ -1,36 +1,19 @@
-// Sync Drive: triggers the GitHub Actions sync workflow.
+// Sync Drive: the Sync button. Starts the GitHub Actions sync workflow.
 // The actual sync runs in GitHub Actions (no timeout issues there).
 //
 // The workflow has a concurrency lock so a second triggered run will queue
 // rather than race the in-progress one, but we still check here so the UI
 // can show a clear "already running" message instead of silently queueing.
+//
+// The GitHub calls are shared with the daily trigger (scheduled-sync.js) in
+// ../lib/github-sync.js.
 
-const REPO = "wearepossible/photolibrary";
-const WORKFLOW = "sync.yml";
+const { startSync } = require("../lib/github-sync");
 
 function checkAuth(event) {
   const auth = event.headers.authorization || "";
   const token = auth.replace("Bearer ", "");
   return token === process.env.ADMIN_PASSWORD;
-}
-
-async function isSyncRunning(pat) {
-  // List recent runs and check whether any is queued or in_progress.
-  const res = await fetch(
-    `https://api.github.com/repos/${REPO}/actions/workflows/${WORKFLOW}/runs?per_page=5`,
-    {
-      headers: {
-        "Authorization": `Bearer ${pat}`,
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-      },
-    }
-  );
-  if (!res.ok) return false;
-  const data = await res.json();
-  return (data.workflow_runs || []).some(
-    (r) => r.status === "queued" || r.status === "in_progress"
-  );
 }
 
 exports.handler = async (event) => {
@@ -51,7 +34,9 @@ exports.handler = async (event) => {
   }
 
   try {
-    if (await isSyncRunning(pat)) {
+    const result = await startSync(pat);
+
+    if (result.outcome === "already_running") {
       return {
         statusCode: 409,
         headers: { "Content-Type": "application/json" },
@@ -62,20 +47,7 @@ exports.handler = async (event) => {
       };
     }
 
-    const res = await fetch(
-      `https://api.github.com/repos/${REPO}/actions/workflows/${WORKFLOW}/dispatches`,
-      {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${pat}`,
-          "Accept": "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
-        },
-        body: JSON.stringify({ ref: "main" }),
-      }
-    );
-
-    if (res.status === 204) {
+    if (result.outcome === "started") {
       return {
         statusCode: 200,
         headers: { "Content-Type": "application/json" },
@@ -83,16 +55,15 @@ exports.handler = async (event) => {
           message: "Sync started. New photos will appear in a few minutes.",
         }),
       };
-    } else {
-      const body = await res.text();
-      console.error("GitHub API error:", res.status, body);
-      return {
-        statusCode: 502,
-        body: JSON.stringify({
-          error: `GitHub API returned ${res.status}`,
-        }),
-      };
     }
+
+    console.error("GitHub API error:", result.status, result.detail);
+    return {
+      statusCode: 502,
+      body: JSON.stringify({
+        error: `GitHub API returned ${result.status}`,
+      }),
+    };
   } catch (err) {
     console.error("Sync trigger error:", err);
     return {
